@@ -22,6 +22,9 @@ typedef struct {
     int *resources;
     int customerCount;
     int **maximum;
+    int *available;
+    int **allocation;
+    int **need;
     int commandCount;
     Command *commands;
 } System;
@@ -98,6 +101,26 @@ static void free_matrix(int **matrix, int rows) {
     }
 
     free(matrix);
+}
+
+static int **allocate_matrix(int rows, int columns) {
+    int **matrix = malloc((size_t)rows * sizeof(int *));
+
+    if (matrix == NULL) {
+        fprintf(stderr, "Error: memory allocation failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int row = 0; row < rows; row++) {
+        matrix[row] = malloc((size_t)columns * sizeof(int));
+
+        if (matrix[row] == NULL) {
+            fprintf(stderr, "Error: memory allocation failed\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    return matrix;
 }
 
 static bool parse_customer_line(char *line, int resourceCount, int *row) {
@@ -293,8 +316,34 @@ static void read_commands(System *system) {
     }
 }
 
+static void initialize_state(System *system) {
+    system->available = malloc((size_t)system->resourceCount * sizeof(int));
+
+    if (system->available == NULL) {
+        fprintf(stderr, "Error: memory allocation failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int resource = 0; resource < system->resourceCount; resource++) {
+        system->available[resource] = system->resources[resource];
+    }
+
+    system->allocation = allocate_matrix(system->customerCount, system->resourceCount);
+    system->need = allocate_matrix(system->customerCount, system->resourceCount);
+
+    for (int customer = 0; customer < system->customerCount; customer++) {
+        for (int resource = 0; resource < system->resourceCount; resource++) {
+            system->allocation[customer][resource] = 0;
+            system->need[customer][resource] = system->maximum[customer][resource];
+        }
+    }
+}
+
 static void free_system(System *system) {
     free_matrix(system->maximum, system->customerCount);
+    free_matrix(system->allocation, system->customerCount);
+    free_matrix(system->need, system->customerCount);
+    free(system->available);
     free(system->resources);
 
     for (int index = 0; index < system->commandCount; index++) {
@@ -309,6 +358,7 @@ int main(int argc, char **argv) {
     system.resources = read_resources(argc, argv, &system.resourceCount);
     read_customers(&system);
     read_commands(&system);
+    initialize_state(&system);
 
     free_system(&system);
     return EXIT_SUCCESS;
