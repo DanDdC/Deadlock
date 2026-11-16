@@ -461,12 +461,32 @@ static void process_request(System *system, int customer, const int *request, FI
     fputc('\n', output);
 }
 
+static void process_release(System *system, int customer, const int *release, FILE *output) {
+    if (!values_fit(release, system->allocation[customer], system->resourceCount)) {
+        fprintf(output, "The customer %d release", customer);
+        print_values(output, release, system->resourceCount);
+        fprintf(output, " was denied because exceed its allocation\n");
+        return;
+    }
+
+    for (int resource = 0; resource < system->resourceCount; resource++) {
+        system->allocation[customer][resource] -= release[resource];
+        system->need[customer][resource] += release[resource];
+        system->available[resource] += release[resource];
+    }
+
+    fprintf(output, "Release from customer %d the resources", customer);
+    print_values(output, release, system->resourceCount);
+    fputc('\n', output);
+}
+
 static void run_command(System *system, const Command *command, FILE *output) {
     switch (command->type) {
         case COMMAND_REQUEST:
             process_request(system, command->customer, command->resources, output);
             break;
         case COMMAND_RELEASE:
+            process_release(system, command->customer, command->resources, output);
             break;
         case COMMAND_PRINT:
             break;
