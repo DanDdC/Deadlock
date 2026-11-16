@@ -316,6 +316,65 @@ static void read_commands(System *system) {
     }
 }
 
+static bool can_finish(const int *need, const int *work, int resourceCount) {
+    for (int resource = 0; resource < resourceCount; resource++) {
+        if (need[resource] > work[resource]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool is_safe_state(const System *system) {
+    int *work = malloc((size_t)system->resourceCount * sizeof(int));
+    bool *finished = calloc((size_t)system->customerCount, sizeof(bool));
+
+    if (work == NULL || finished == NULL) {
+        free(work);
+        free(finished);
+        fprintf(stderr, "Error: memory allocation failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int resource = 0; resource < system->resourceCount; resource++) {
+        work[resource] = system->available[resource];
+    }
+
+    int completed = 0;
+
+    while (completed < system->customerCount) {
+        bool progress = false;
+
+        for (int customer = 0; customer < system->customerCount; customer++) {
+            if (finished[customer]) {
+                continue;
+            }
+
+            if (!can_finish(system->need[customer], work, system->resourceCount)) {
+                continue;
+            }
+
+            for (int resource = 0; resource < system->resourceCount; resource++) {
+                work[resource] += system->allocation[customer][resource];
+            }
+
+            finished[customer] = true;
+            completed++;
+            progress = true;
+        }
+
+        if (!progress) {
+            break;
+        }
+    }
+
+    bool safe = completed == system->customerCount;
+    free(work);
+    free(finished);
+    return safe;
+}
+
 static void initialize_state(System *system) {
     system->available = malloc((size_t)system->resourceCount * sizeof(int));
 
@@ -359,6 +418,12 @@ int main(int argc, char **argv) {
     read_customers(&system);
     read_commands(&system);
     initialize_state(&system);
+
+    if (!is_safe_state(&system)) {
+        fprintf(stderr, "Error: initial state is not safe\n");
+        free_system(&system);
+        return EXIT_FAILURE;
+    }
 
     free_system(&system);
     return EXIT_SUCCESS;
