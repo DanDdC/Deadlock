@@ -480,6 +480,87 @@ static void process_release(System *system, int customer, const int *release, FI
     fputc('\n', output);
 }
 
+static int row_width(const int *row, int resourceCount) {
+    int width = resourceCount - 1;
+
+    for (int resource = 0; resource < resourceCount; resource++) {
+        int value = row[resource];
+
+        if (value == 0) {
+            width++;
+            continue;
+        }
+
+        while (value > 0) {
+            width++;
+            value /= 10;
+        }
+    }
+
+    return width;
+}
+
+static void print_matrix_row(FILE *output, const int *row, int resourceCount, int width) {
+    for (int resource = 0; resource < resourceCount; resource++) {
+        if (resource > 0) {
+            fputc(' ', output);
+        }
+
+        fprintf(output, "%d", row[resource]);
+    }
+
+    for (int printed = row_width(row, resourceCount); printed < width; printed++) {
+        fputc(' ', output);
+    }
+}
+
+static void print_state(const System *system, FILE *output) {
+    int maximumWidth = (int)strlen("MAXIMUM");
+    int allocationWidth = (int)strlen("ALLOCATION");
+    int needWidth = (int)strlen("NEED");
+
+    for (int customer = 0; customer < system->customerCount; customer++) {
+        int maximumRow = row_width(system->maximum[customer], system->resourceCount);
+        int allocationRow = row_width(system->allocation[customer], system->resourceCount);
+        int needRow = row_width(system->need[customer], system->resourceCount);
+
+        if (maximumRow > maximumWidth) {
+            maximumWidth = maximumRow;
+        }
+
+        if (allocationRow > allocationWidth) {
+            allocationWidth = allocationRow;
+        }
+
+        if (needRow > needWidth) {
+            needWidth = needRow;
+        }
+    }
+
+    maximumWidth += 3;
+    allocationWidth += 2;
+    needWidth += 1;
+
+    fprintf(output, "%-*s|   %-*s|   %s\n", maximumWidth, "MAXIMUM", allocationWidth, "ALLOCATION", "NEED");
+
+    for (int customer = 0; customer < system->customerCount; customer++) {
+        print_matrix_row(output, system->maximum[customer], system->resourceCount, maximumWidth);
+        fprintf(output, "|   ");
+        print_matrix_row(output, system->allocation[customer], system->resourceCount, allocationWidth);
+        fprintf(output, "|   ");
+        print_matrix_row(output, system->need[customer], system->resourceCount, needWidth);
+        fputc('\n', output);
+    }
+
+    fprintf(output, "AVAILABLE ");
+
+    for (int resource = 0; resource < system->resourceCount; resource++) {
+        fprintf(output, "%d ", system->available[resource]);
+    }
+
+    fputc('\n', output);
+}
+
 static void run_command(System *system, const Command *command, FILE *output) {
     switch (command->type) {
         case COMMAND_REQUEST:
@@ -489,6 +570,7 @@ static void run_command(System *system, const Command *command, FILE *output) {
             process_release(system, command->customer, command->resources, output);
             break;
         case COMMAND_PRINT:
+            print_state(system, output);
             break;
     }
 }
