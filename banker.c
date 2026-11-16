@@ -70,29 +70,37 @@ static bool parse_nonnegative_integer(const char *text, int *value) {
     return parse_integer(text, value, true);
 }
 
-static int *read_resources(int argc, char **argv, int *resourceCount) {
+static bool read_resources(int argc, char **argv, System *system) {
     if (argc < 2) {
         print_usage(argv[0]);
-        exit(EXIT_FAILURE);
+        return false;
     }
 
-    *resourceCount = argc - 1;
-    int *resources = malloc((size_t)*resourceCount * sizeof(int));
+    system->resourceCount = argc - 1;
+    system->resources = malloc((size_t)system->resourceCount * sizeof(int));
 
-    if (resources == NULL) {
+    if (system->resources == NULL) {
         fprintf(stderr, "Error: memory allocation failed\n");
-        exit(EXIT_FAILURE);
+        return false;
     }
 
-    for (int index = 0; index < *resourceCount; index++) {
-        if (!parse_positive_integer(argv[index + 1], &resources[index])) {
+    long long total = 0;
+
+    for (int index = 0; index < system->resourceCount; index++) {
+        if (!parse_positive_integer(argv[index + 1], &system->resources[index])) {
             fprintf(stderr, "Error: resource count '%s' must be a positive integer\n", argv[index + 1]);
-            free(resources);
-            exit(EXIT_FAILURE);
+            return false;
+        }
+
+        total += system->resources[index];
+
+        if (total > INT_MAX) {
+            fprintf(stderr, "Error: total resources exceed %d\n", INT_MAX);
+            return false;
         }
     }
 
-    return resources;
+    return true;
 }
 
 static void free_matrix(int **matrix, int rows) {
@@ -111,16 +119,15 @@ static int **allocate_matrix(int rows, int columns) {
     int **matrix = malloc((size_t)rows * sizeof(int *));
 
     if (matrix == NULL) {
-        fprintf(stderr, "Error: memory allocation failed\n");
-        exit(EXIT_FAILURE);
+        return NULL;
     }
 
     for (int row = 0; row < rows; row++) {
         matrix[row] = malloc((size_t)columns * sizeof(int));
 
         if (matrix[row] == NULL) {
-            fprintf(stderr, "Error: memory allocation failed\n");
-            exit(EXIT_FAILURE);
+            free_matrix(matrix, row);
+            return NULL;
         }
     }
 
@@ -168,18 +175,19 @@ static bool parse_customer_line(char *line, int resourceCount, int *row) {
     return true;
 }
 
-static void read_customers(System *system) {
+static bool read_customers(System *system) {
     FILE *file = fopen("customer.txt", "r");
 
     if (file == NULL) {
         fprintf(stderr, "Error: could not open customer.txt\n");
-        exit(EXIT_FAILURE);
+        return false;
     }
 
     char *line = NULL;
     size_t lineCapacity = 0;
     ssize_t lineLength;
     int lineNumber = 0;
+    bool success = true;
 
     while ((lineLength = getline(&line, &lineCapacity, file)) != -1) {
         lineNumber++;
@@ -187,17 +195,15 @@ static void read_customers(System *system) {
 
         if (row == NULL) {
             fprintf(stderr, "Error: memory allocation failed\n");
-            free(line);
-            fclose(file);
-            exit(EXIT_FAILURE);
+            success = false;
+            break;
         }
 
         if (!parse_customer_line(line, system->resourceCount, row)) {
             fprintf(stderr, "Error: customer.txt line %d is invalid or does not contain %d resources\n", lineNumber, system->resourceCount);
             free(row);
-            free(line);
-            fclose(file);
-            exit(EXIT_FAILURE);
+            success = false;
+            break;
         }
 
         int **newMaximum = realloc(system->maximum, (size_t)(system->customerCount + 1) * sizeof(int *));
@@ -205,9 +211,8 @@ static void read_customers(System *system) {
         if (newMaximum == NULL) {
             fprintf(stderr, "Error: memory allocation failed\n");
             free(row);
-            free(line);
-            fclose(file);
-            exit(EXIT_FAILURE);
+            success = false;
+            break;
         }
 
         system->maximum = newMaximum;
@@ -215,20 +220,24 @@ static void read_customers(System *system) {
         system->customerCount++;
     }
 
-    if (ferror(file)) {
+    if (success && ferror(file)) {
         fprintf(stderr, "Error: could not read customer.txt\n");
-        free(line);
-        fclose(file);
-        exit(EXIT_FAILURE);
+        success = false;
     }
 
     free(line);
     fclose(file);
 
+    if (!success) {
+        return false;
+    }
+
     if (system->customerCount == 0) {
         fprintf(stderr, "Error: customer.txt is empty\n");
-        exit(EXIT_FAILURE);
+        return false;
     }
+
+    return true;
 }
 
 static bool parse_command_line(char *line, int resourceCount, int customerCount, Command *command) {
@@ -294,18 +303,19 @@ static bool parse_command_line(char *line, int resourceCount, int customerCount,
     return true;
 }
 
-static void read_commands(System *system) {
+static bool read_commands(System *system) {
     FILE *file = fopen("commands.txt", "r");
 
     if (file == NULL) {
         fprintf(stderr, "Error: could not open commands.txt\n");
-        exit(EXIT_FAILURE);
+        return false;
     }
 
     char *line = NULL;
     size_t lineCapacity = 0;
     ssize_t lineLength;
     int lineNumber = 0;
+    bool success = true;
 
     while ((lineLength = getline(&line, &lineCapacity, file)) != -1) {
         lineNumber++;
@@ -314,9 +324,8 @@ static void read_commands(System *system) {
         if (!parse_command_line(line, system->resourceCount, system->customerCount, &command)) {
             fprintf(stderr, "Error: commands.txt line %d is invalid or does not contain %d resource values\n", lineNumber, system->resourceCount);
             free(command.resources);
-            free(line);
-            fclose(file);
-            exit(EXIT_FAILURE);
+            success = false;
+            break;
         }
 
         Command *newCommands = realloc(system->commands, (size_t)(system->commandCount + 1) * sizeof(Command));
@@ -324,9 +333,8 @@ static void read_commands(System *system) {
         if (newCommands == NULL) {
             fprintf(stderr, "Error: memory allocation failed\n");
             free(command.resources);
-            free(line);
-            fclose(file);
-            exit(EXIT_FAILURE);
+            success = false;
+            break;
         }
 
         system->commands = newCommands;
@@ -334,20 +342,24 @@ static void read_commands(System *system) {
         system->commandCount++;
     }
 
-    if (ferror(file)) {
+    if (success && ferror(file)) {
         fprintf(stderr, "Error: could not read commands.txt\n");
-        free(line);
-        fclose(file);
-        exit(EXIT_FAILURE);
+        success = false;
     }
 
     free(line);
     fclose(file);
 
+    if (!success) {
+        return false;
+    }
+
     if (system->commandCount == 0) {
         fprintf(stderr, "Error: commands.txt is empty\n");
-        exit(EXIT_FAILURE);
+        return false;
     }
+
+    return true;
 }
 
 static bool can_finish(const int *need, const int *work, int resourceCount) {
@@ -409,12 +421,12 @@ static bool is_safe_state(const System *system) {
     return safe;
 }
 
-static void initialize_state(System *system) {
+static bool initialize_state(System *system) {
     system->available = malloc((size_t)system->resourceCount * sizeof(int));
 
     if (system->available == NULL) {
         fprintf(stderr, "Error: memory allocation failed\n");
-        exit(EXIT_FAILURE);
+        return false;
     }
 
     for (int resource = 0; resource < system->resourceCount; resource++) {
@@ -424,12 +436,19 @@ static void initialize_state(System *system) {
     system->allocation = allocate_matrix(system->customerCount, system->resourceCount);
     system->need = allocate_matrix(system->customerCount, system->resourceCount);
 
+    if (system->allocation == NULL || system->need == NULL) {
+        fprintf(stderr, "Error: memory allocation failed\n");
+        return false;
+    }
+
     for (int customer = 0; customer < system->customerCount; customer++) {
         for (int resource = 0; resource < system->resourceCount; resource++) {
             system->allocation[customer][resource] = 0;
             system->need[customer][resource] = system->maximum[customer][resource];
         }
     }
+
+    return true;
 }
 
 static bool values_fit(const int *values, const int *limit, int resourceCount) {
@@ -609,6 +628,12 @@ static void run_command(System *system, const Command *command, FILE *output) {
     }
 }
 
+static void run_commands(System *system, FILE *output) {
+    for (int index = 0; index < system->commandCount; index++) {
+        run_command(system, &system->commands[index], output);
+    }
+}
+
 static void free_system(System *system) {
     free_matrix(system->maximum, system->customerCount);
     free_matrix(system->allocation, system->customerCount);
@@ -625,10 +650,26 @@ static void free_system(System *system) {
 
 int main(int argc, char **argv) {
     System system = {0};
-    system.resources = read_resources(argc, argv, &system.resourceCount);
-    read_customers(&system);
-    read_commands(&system);
-    initialize_state(&system);
+
+    if (!read_resources(argc, argv, &system)) {
+        free_system(&system);
+        return EXIT_FAILURE;
+    }
+
+    if (!read_customers(&system)) {
+        free_system(&system);
+        return EXIT_FAILURE;
+    }
+
+    if (!read_commands(&system)) {
+        free_system(&system);
+        return EXIT_FAILURE;
+    }
+
+    if (!initialize_state(&system)) {
+        free_system(&system);
+        return EXIT_FAILURE;
+    }
 
     if (!is_safe_state(&system)) {
         fprintf(stderr, "Error: initial state is not safe\n");
@@ -644,11 +685,23 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    for (int index = 0; index < system.commandCount; index++) {
-        run_command(&system, &system.commands[index], output);
+    run_commands(&system, output);
+
+    if (ferror(output)) {
+        fprintf(stderr, "Error: could not write result.txt\n");
+        fclose(output);
+        remove("result.txt");
+        free_system(&system);
+        return EXIT_FAILURE;
     }
 
-    fclose(output);
+    if (fclose(output) != 0) {
+        fprintf(stderr, "Error: could not write result.txt\n");
+        remove("result.txt");
+        free_system(&system);
+        return EXIT_FAILURE;
+    }
+
     free_system(&system);
     return EXIT_SUCCESS;
 }
