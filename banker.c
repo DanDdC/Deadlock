@@ -1,9 +1,13 @@
+#define _POSIX_C_SOURCE 200809L
+
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 typedef enum {
     COMMAND_REQUEST,
@@ -124,28 +128,44 @@ static int **allocate_matrix(int rows, int columns) {
 }
 
 static bool parse_customer_line(char *line, int resourceCount, int *row) {
-    int count = 0;
-    char *token = strtok(line, ",\r\n");
+    char *cursor = line;
 
-    while (token != NULL) {
-        if (count >= resourceCount) {
+    for (int index = 0; index < resourceCount; index++) {
+        while (isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+
+        if (*cursor == '\0') {
             return false;
         }
 
         char *end = NULL;
         errno = 0;
-        long value = strtol(token, &end, 10);
+        long value = strtol(cursor, &end, 10);
 
-        if (end == token || *end != '\0' || errno == ERANGE || value < 0 || value > INT_MAX) {
+        if (end == cursor || errno == ERANGE || value < 0 || value > INT_MAX) {
             return false;
         }
 
-        row[count] = (int)value;
-        count++;
-        token = strtok(NULL, ",\r\n");
+        row[index] = (int)value;
+        cursor = end;
+
+        while (isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+
+        if (index < resourceCount - 1) {
+            if (*cursor != ',') {
+                return false;
+            }
+
+            cursor++;
+        } else if (*cursor != '\0') {
+            return false;
+        }
     }
 
-    return count == resourceCount;
+    return true;
 }
 
 static void read_customers(System *system) {
@@ -156,22 +176,26 @@ static void read_customers(System *system) {
         exit(EXIT_FAILURE);
     }
 
-    char line[4096];
+    char *line = NULL;
+    size_t lineCapacity = 0;
+    ssize_t lineLength;
     int lineNumber = 0;
 
-    while (fgets(line, sizeof(line), file) != NULL) {
+    while ((lineLength = getline(&line, &lineCapacity, file)) != -1) {
         lineNumber++;
         int *row = malloc((size_t)system->resourceCount * sizeof(int));
 
         if (row == NULL) {
             fprintf(stderr, "Error: memory allocation failed\n");
+            free(line);
             fclose(file);
             exit(EXIT_FAILURE);
         }
 
         if (!parse_customer_line(line, system->resourceCount, row)) {
-            fprintf(stderr, "Error: customer.txt line %d has an invalid format\n", lineNumber);
+            fprintf(stderr, "Error: customer.txt line %d is invalid or does not contain %d resources\n", lineNumber, system->resourceCount);
             free(row);
+            free(line);
             fclose(file);
             exit(EXIT_FAILURE);
         }
@@ -181,6 +205,7 @@ static void read_customers(System *system) {
         if (newMaximum == NULL) {
             fprintf(stderr, "Error: memory allocation failed\n");
             free(row);
+            free(line);
             fclose(file);
             exit(EXIT_FAILURE);
         }
@@ -192,10 +217,12 @@ static void read_customers(System *system) {
 
     if (ferror(file)) {
         fprintf(stderr, "Error: could not read customer.txt\n");
+        free(line);
         fclose(file);
         exit(EXIT_FAILURE);
     }
 
+    free(line);
     fclose(file);
 
     if (system->customerCount == 0) {
@@ -275,15 +302,19 @@ static void read_commands(System *system) {
         exit(EXIT_FAILURE);
     }
 
-    char line[4096];
+    char *line = NULL;
+    size_t lineCapacity = 0;
+    ssize_t lineLength;
     int lineNumber = 0;
 
-    while (fgets(line, sizeof(line), file) != NULL) {
+    while ((lineLength = getline(&line, &lineCapacity, file)) != -1) {
         lineNumber++;
         Command command = {0};
 
         if (!parse_command_line(line, system->resourceCount, system->customerCount, &command)) {
-            fprintf(stderr, "Error: commands.txt line %d has an invalid format\n", lineNumber);
+            fprintf(stderr, "Error: commands.txt line %d is invalid or does not contain %d resource values\n", lineNumber, system->resourceCount);
+            free(command.resources);
+            free(line);
             fclose(file);
             exit(EXIT_FAILURE);
         }
@@ -293,6 +324,7 @@ static void read_commands(System *system) {
         if (newCommands == NULL) {
             fprintf(stderr, "Error: memory allocation failed\n");
             free(command.resources);
+            free(line);
             fclose(file);
             exit(EXIT_FAILURE);
         }
@@ -304,10 +336,12 @@ static void read_commands(System *system) {
 
     if (ferror(file)) {
         fprintf(stderr, "Error: could not read commands.txt\n");
+        free(line);
         fclose(file);
         exit(EXIT_FAILURE);
     }
 
+    free(line);
     fclose(file);
 
     if (system->commandCount == 0) {
