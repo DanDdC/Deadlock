@@ -398,6 +398,81 @@ static void initialize_state(System *system) {
     }
 }
 
+static bool values_fit(const int *values, const int *limit, int resourceCount) {
+    for (int resource = 0; resource < resourceCount; resource++) {
+        if (values[resource] > limit[resource]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static void print_values(FILE *output, const int *values, int resourceCount) {
+    for (int resource = 0; resource < resourceCount; resource++) {
+        fprintf(output, " %d", values[resource]);
+    }
+}
+
+static void print_values_with_trailing_space(FILE *output, const int *values, int resourceCount) {
+    for (int resource = 0; resource < resourceCount; resource++) {
+        fprintf(output, "%d ", values[resource]);
+    }
+}
+
+static void process_request(System *system, int customer, const int *request, FILE *output) {
+    if (!values_fit(request, system->need[customer], system->resourceCount)) {
+        fprintf(output, "The customer %d request", customer);
+        print_values(output, request, system->resourceCount);
+        fprintf(output, " was denied because exceed its maximum allocation\n");
+        return;
+    }
+
+    if (!values_fit(request, system->available, system->resourceCount)) {
+        fprintf(output, "The resources ");
+        print_values_with_trailing_space(output, system->available, system->resourceCount);
+        fprintf(output, "are not enough to customer %d request ", customer);
+        print_values_with_trailing_space(output, request, system->resourceCount);
+        fputc('\n', output);
+        return;
+    }
+
+    for (int resource = 0; resource < system->resourceCount; resource++) {
+        system->available[resource] -= request[resource];
+        system->allocation[customer][resource] += request[resource];
+        system->need[customer][resource] -= request[resource];
+    }
+
+    if (!is_safe_state(system)) {
+        for (int resource = 0; resource < system->resourceCount; resource++) {
+            system->available[resource] += request[resource];
+            system->allocation[customer][resource] -= request[resource];
+            system->need[customer][resource] += request[resource];
+        }
+
+        fprintf(output, "The customer %d request", customer);
+        print_values(output, request, system->resourceCount);
+        fprintf(output, " was denied because result in an unsafe state\n");
+        return;
+    }
+
+    fprintf(output, "Allocate to customer %d the resources", customer);
+    print_values(output, request, system->resourceCount);
+    fputc('\n', output);
+}
+
+static void run_command(System *system, const Command *command, FILE *output) {
+    switch (command->type) {
+        case COMMAND_REQUEST:
+            process_request(system, command->customer, command->resources, output);
+            break;
+        case COMMAND_RELEASE:
+            break;
+        case COMMAND_PRINT:
+            break;
+    }
+}
+
 static void free_system(System *system) {
     free_matrix(system->maximum, system->customerCount);
     free_matrix(system->allocation, system->customerCount);
@@ -425,6 +500,19 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
+    FILE *output = fopen("result.txt", "w");
+
+    if (output == NULL) {
+        fprintf(stderr, "Error: could not create result.txt\n");
+        free_system(&system);
+        return EXIT_FAILURE;
+    }
+
+    for (int index = 0; index < system.commandCount; index++) {
+        run_command(&system, &system.commands[index], output);
+    }
+
+    fclose(output);
     free_system(&system);
     return EXIT_SUCCESS;
 }
